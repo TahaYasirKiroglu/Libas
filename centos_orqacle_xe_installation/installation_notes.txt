@@ -1,0 +1,129 @@
+###############################
+#requirements                 #
+#   oracle java rpm file      #
+#   oracle xe                 #
+#   root priviledges          #
+###############################
+
+# for unzipping
+yum install unzip liaio bc flex sl
+# i think sl is good package for fun
+
+# unzip zip
+unzip oracle-xe-11.2.0-1.0x86_64.rpm.zip
+
+# install java from oracle
+rpm -Uvh jdk-8u172-linux-x64.rpm
+
+# oracle 11g need minimum 2 gb swap field
+# swap_path
+swap_path=/swapfile
+
+# 3GB swap field
+fallocate -l 4G $swap_path
+# add swap permission
+chmod 600 $swap_path
+
+# control statu
+# ls -lh $swap_path
+
+# make swap
+mkswap $swap_path
+
+# write swap file to fstab
+echo "$swap_path   swap    swap    sw  0   0" >> /etc/fstab
+
+# activate swap
+swapon $swap_path
+
+# for speed
+# set caching 50
+sudo sysctl vm.vfs_cache_pressure=50
+
+# configure oracle-xe
+/etc/init.d/oracle-xe configure
+# include 
+# http port
+# listener port
+# password
+
+# add source code of oracle_env
+. /u01/app/oracle/product/11.2.0/xe/bin/oracle_env.sh
+
+# add source code of oracle_env for start of terminal
+# ! NOTE: ADD FOR USER
+echo '. /u01/app/oracle/product/11.2.0/xe/bin/oracle_env.sh' > ~/.bashrc
+
+# make a login to sqlplus without connect
+sqlplus /nolog
+# WTF! i dont know it. but i'll search it..Later!
+> EXEC DBMS_XDB.SETLISTENERLOCALACCESS(FALSE);
+
+# make recovery folder
+mkdir /opt/fra
+chown oracle:dba /opt/fra 
+
+## move log
+SQLPLUS>
+@?/sqlplus/admin/movelogs  
+SET FEEDBACK 1  
+SET NUMWIDTH 10  
+SET LINESIZE 80  
+SET TRIMSPOOL ON  
+SET TAB OFF  
+SET PAGESIZE 100  
+declare  
+   cursor rlc is  
+      select group# grp, thread# thr, bytes/1024 bytes_k  
+        from v$log  
+      order by 1;  
+   stmt     varchar2(2048);  
+   swtstmt  varchar2(1024) := 'alter system switch logfile';  
+   ckpstmt  varchar2(1024) := 'alter system checkpoint global';  
+begin  
+   for rlcRec in rlc loop  
+  stmt := 'alter database add logfile thread ' ||  
+               rlcRec.thr || ' size ' ||  
+               rlcRec.bytes_k || 'K';  
+      execute immediate stmt;  
+      begin  
+         stmt := 'alter database drop logfile group ' || rlcRec.grp;  
+         execute immediate stmt;  
+      exception  
+         when others then  
+            execute immediate swtstmt;  
+            execute immediate ckpstmt;  
+            execute immediate stmt;  
+      end;  
+      execute immediate swtstmt;  
+   end loop;  
+end;  
+/  
+## end of move log
+
+# set recovery dest size
+SQLPLUS> ALTER SYSTEM SET DB_RECOVERY_FILE_DEST_SIZE = 10G; 
+
+# for listing
+# show parameter DB_RECOVERY_FILE_DEST;  
+
+# change log file
+ALTER DATABASE ADD LOGFILE MEMBER '/u01/app/oracle/oradata/XE/log2b.LOG' TO GROUP 2;
+
+## NOTE: If you know nothing about archivelog don't open it!
+# set archivelog
+shutdown immediate  
+startup mount  
+alter database archivelog;  
+alter database open;  
+# end of set archivelog
+
+
+### set backup file ###
+mkdir /opt/ora_backup  
+chown oracle:dba /opt/ora_backup
+cp  /u01/app/oracle/product/11.2.0/xe/config/scripts/backup.sh /opt/ora_backup/backup.sh  
+# optional
+# you may add comment line in backup.sh
+### end of set backup file ####
+
